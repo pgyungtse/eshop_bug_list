@@ -1,57 +1,89 @@
 {% extends "base.html" %}
 
-{% block title %}新增錯誤{% endblock %}
+{% block title %}新增錯誤記錄{% endblock %}
 
 {% block content %}
-    <h2>新增錯誤記錄</h2>
+<div class="container mt-4">
+    <h2 class="mb-4">新增錯誤記錄</h2>
+    
     <form method="POST">
-        <div class="mb-3">
-            <label for="system" class="form-label">系統</label>
-            <input type="text" class="form-control" id="system" name="system" required>
+        <div class="row">
+            <div class="col-md-8">
+                <div class="mb-3">
+                    <label for="system" class="form-label">系統 <span class="text-danger">*</span></label>
+                    <select class="form-select" id="system" name="system" required>
+                        <option value="" disabled selected>請選擇系統</option>
+                        <option value="eShop">eShop</option>
+                        <option value="M18">M18</option>
+                        <option value="Jetplus/MePOS">Jetplus/MePOS</option>
+                    </select>
+                </div>
+
+                <div class="mb-3">
+                    <label for="bug_details" class="form-label">錯誤細節 <span class="text-danger">*</span></label>
+                    <textarea class="form-control" id="bug_details" name="bug_details" rows="5" required placeholder="請詳細描述錯誤現象、重現步驟、影響範圍等..."></textarea>
+                </div>
+
+                <div class="mb-3">
+                    <label for="reported_by" class="form-label">報告者 <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="reported_by" name="reported_by" required placeholder="您的姓名或工號">
+                </div>
+
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label for="status" class="form-label">狀態</label>
+                            <select class="form-select" id="status" name="status">
+                                <option value="開放中" selected>開放中</option>
+                                <option value="處理中">處理中</option>
+                                <option value="已解決">已解決</option>
+                                <option value="已關閉">已關閉</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label for="priority" class="form-label">優先級</label>
+                            <select class="form-select" id="priority" name="priority">
+                                <option value="低">低</option>
+                                <option value="中" selected>中</option>
+                                <option value="高">高</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label for="severity" class="form-label">嚴重程度</label>
+                            <select class="form-select" id="severity" name="severity">
+                                <option value="輕微">輕微</option>
+                                <option value="中" selected>中</option>
+                                <option value="重大">重大</option>
+                                <option value="嚴重">嚴重</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label for="assigned_to" class="form-label">指派給</label>
+                            <input type="text" class="form-control" id="assigned_to" name="assigned_to" placeholder="負責人姓名（可選）">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label for="notes" class="form-label">備註</label>
+                    <textarea class="form-control" id="notes" name="notes" rows="3" placeholder="如為已解決或已關閉，請在此說明解決方式或關閉原因..."></textarea>
+                </div>
+
+                <div class="d-flex gap-2">
+                    <button type="submit" class="btn btn-primary btn-lg">提交新增</button>
+                    <a href="{{ url_for('index') }}" class="btn btn-secondary btn-lg">取消返回</a>
+                </div>
+            </div>
         </div>
-        <div class="mb-3">
-            <label for="bug_details" class="form-label">錯誤細節</label>
-            <textarea class="form-control" id="bug_details" name="bug_details" required></textarea>
-        </div>
-        <div class="mb-3">
-            <label for="reported_by" class="form-label">報告者</label>
-            <input type="text" class="form-control" id="reported_by" name="reported_by" required>
-        </div>
-        <div class="mb-3">
-            <label for="status" class="form-label">狀態</label>
-            <select class="form-select" id="status" name="status">
-                <option value="開放中">開放中</option>
-                <option value="處理中">處理中</option>
-                <option value="已解決">已解決</option>
-                <option value="已關閉">已關閉</option>
-            </select>
-        </div>
-        <div class="mb-3">
-            <label for="priority" class="form-label">優先級</label>
-            <select class="form-select" id="priority" name="priority">
-                <option value="低">低</option>
-                <option value="中">中</option>
-                <option value="高">高</option>
-            </select>
-        </div>
-        <div class="mb-3">
-            <label for="severity" class="form-label">嚴重程度</label>
-            <select class="form-select" id="severity" name="severity">
-                <option value="輕微">輕微</option>
-                <option value="中">中</option>
-                <option value="重大">重大</option>
-                <option value="嚴重">嚴重</option>
-            </select>
-        </div>
-        <div class="mb-3">
-            <label for="assigned_to" class="form-label">指派給</label>
-            <input type="text" class="form-control" id="assigned_to" name="assigned_to">
-        </div>
-        <div class="mb-3">
-            <label for="notes" class="form-label">備註</label>
-            <textarea class="form-control" id="notes" name="notes"></textarea>
-        </div>
-        <button type="submit" class="btn btn-primary">提交</button>
-        <a href="{{ url_for('index') }}" class="btn btn-secondary">取消</a>
     </form>
+</div>
 {% endblock %}
