@@ -1,0 +1,22 @@
+services:
+  app:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./bug_tracker.db:/app/bug_tracker.db
+    environment:
+      - SECRET_KEY=your_secret_key_here  # Replace with your actual secret key
+
+  # Optional: If you want to use a separate database like PostgreSQL instead of SQLite
+  # db:
+  #   image: postgres:13
+  #   environment:
+  #     POSTGRES_DB: bug_tracker
+  #     POSTGRES_USER: user
+  #     POSTGRES_PASSWORD: password
+  #   volumes:
+  #     - db_data:/var/lib/postgresql/data
+
+volumes:
+  db_data:
