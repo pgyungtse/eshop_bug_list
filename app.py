@@ -1,14 +1,19 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session, Response
-import sqlite3
 from datetime import datetime
 from dotenv import load_dotenv
 import os
+import logging
 from werkzeug.security import check_password_hash, generate_password_hash
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from io import BytesIO
+from db_supabase import get_db_connection_wrapper
 
 load_dotenv()
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY')
@@ -16,23 +21,37 @@ app.secret_key = os.getenv('SECRET_KEY')
 if not app.secret_key:
     raise ValueError("請在 .env 檔案中設定 SECRET_KEY！")
 
+# Error handler for better debugging
+@app.errorhandler(500)
+def internal_error(error):
+    logger.error(f'Internal server error: {error}', exc_info=True)
+    return render_template('error.html', error=str(error)), 500
+
+# Custom filter to format datetime objects
+@app.template_filter('format_datetime')
+def format_datetime(value):
+    """Format datetime object to yyyy-mm-dd hh:mm:ss"""
+    if value is None:
+        return ''
+    if isinstance(value, datetime):
+        return value.strftime('%Y-%m-%d %H:%M:%S')
+    return value
+
 def get_db_connection():
-    conn = sqlite3.connect('bug_tracker.db')
-    conn.row_factory = sqlite3.Row
-    return conn
+    return get_db_connection_wrapper()
 
 # 取得目前登入使用者
 def get_current_user():
     if 'user_id' not in session:
         return None
     conn = get_db_connection()
-    user = conn.execute('SELECT * FROM users WHERE id = ?', (session['user_id'],)).fetchone()
+    user = conn.execute('SELECT * FROM users WHERE id = %s', (session['user_id'],)).fetchone()
     conn.close()
     return user
 
 # 判斷是否為管理員
 def is_admin(user):
-    return user['is_admin'] == 1 if user else False
+    return user['is_admin'] is True if user else False
 
 # 判斷目前使用者是否有權編輯或刪除指定 bug
 def can_edit_or_delete(bug, user):
@@ -55,7 +74,7 @@ def index():
             bugs = conn.execute('''
                 SELECT b.*, u.username as reporter_username 
                 FROM bugs b LEFT JOIN users u ON b.reported_by_user_id = u.id
-                WHERE b.bug_details LIKE ? OR b.system LIKE ? OR b.notes LIKE ?
+                WHERE b.bug_details ILIKE %s OR b.system ILIKE %s OR b.notes ILIKE %s
                 ORDER BY b.report_date DESC
             ''', (f'%{query}%', f'%{query}%', f'%{query}%')).fetchall()
         else:
@@ -106,12 +125,12 @@ def add_bug():
         conn = get_db_connection()
         conn.execute('''
             INSERT INTO bugs 
-            (system, bug_details, reported_by, status, priority, severity, assigned_to, notes, reported_by_user_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (system, bug_details, reported_by, status, priority, severity, assigned_to, notes, reported_by_user_id))
+            (report_date, system, bug_details, reported_by, status, priority, severity, assigned_to, notes, reported_by_user_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ''', (datetime.now(), system, bug_details, reported_by, status, priority, severity, assigned_to, notes, reported_by_user_id))
         conn.commit()
         conn.close()
-        flash('錯誤記錄新增成功！')
+        flash('記錄新增成功！')
         return redirect(url_for('index'))
 
     return render_template('add.html', user=user)
@@ -125,7 +144,7 @@ def edit_bug(id):
         return redirect(url_for('login'))
 
     conn = get_db_connection()
-    bug = conn.execute('SELECT * FROM bugs WHERE id = ?', (id,)).fetchone()
+    bug = conn.execute('SELECT * FROM bugs WHERE id = %s', (id,)).fetchone()
     conn.close()
 
     if bug is None:
@@ -155,18 +174,18 @@ def edit_bug(id):
 
         resolution_date = bug['resolution_date']
         if bug['status'] not in ['已解決', '已關閉'] and status in ['已解決', '已關閉']:
-            resolution_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            resolution_date = datetime.now()
 
         conn = get_db_connection()
         conn.execute('''
             UPDATE bugs 
-            SET bug_details = ?, reported_by = ?, status = ?, priority = ?, severity = ?, 
-                assigned_to = ?, notes = ?, resolution_date = ?
-            WHERE id = ?
+            SET bug_details = %s, reported_by = %s, status = %s, priority = %s, severity = %s, 
+                assigned_to = %s, notes = %s, resolution_date = %s
+            WHERE id = %s
         ''', (bug_details, reported_by, status, priority, severity, assigned_to, notes, resolution_date, id))
         conn.commit()
         conn.close()
-        flash('錯誤記錄更新成功！')
+        flash('記錄更新成功！')
         return redirect(url_for('index'))
 
     return render_template('edit.html', bug=bug, user=user)
@@ -180,10 +199,10 @@ def delete_bug(id):
         return redirect(url_for('login'))
 
     conn = get_db_connection()
-    bug = conn.execute('SELECT * FROM bugs WHERE id = ?', (id,)).fetchone()
+    bug = conn.execute('SELECT * FROM bugs WHERE id = %s', (id,)).fetchone()
 
     if bug and can_edit_or_delete(bug, user):
-        conn.execute('DELETE FROM bugs WHERE id = ?', (id,))
+        conn.execute('DELETE FROM bugs WHERE id = %s', (id,))
         conn.commit()
         flash('錯誤記錄刪除成功！')
     else:
@@ -199,7 +218,7 @@ def login():
         username = request.form['username']
         password = request.form['password']
         conn = get_db_connection()
-        user = conn.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
+        user = conn.execute('SELECT * FROM users WHERE username = %s', (username,)).fetchone()
         conn.close()
 
         if user and check_password_hash(user['password_hash'], password):
@@ -215,39 +234,47 @@ def login():
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
-        username = request.form['username'].strip()
-        password = request.form['password']
-        confirm_password = request.form['confirm_password']
+        try:
+            username = request.form.get('username', '').strip()
+            password = request.form.get('password', '')
+            confirm_password = request.form.get('confirm_password', '')
 
-        if not username or not password:
-            flash('使用者名稱與密碼皆為必填！', 'error')
+            if not username or not password:
+                flash('使用者名稱與密碼皆為必填！', 'error')
+                return render_template('register.html')
+
+            if password != confirm_password:
+                flash('兩次輸入的密碼不一致！', 'error')
+                return render_template('register.html')
+
+            if len(password) < 6:
+                flash('密碼長度至少需 6 個字元！', 'error')
+                return render_template('register.html')
+
+            conn = get_db_connection()
+            try:
+                existing_user = conn.execute('SELECT * FROM users WHERE username = %s', (username,)).fetchone()
+                if existing_user:
+                    flash('此使用者名稱已被使用，請選擇其他名稱！', 'error')
+                    return render_template('register.html')
+
+                password_hash = generate_password_hash(password)
+                conn.execute('''
+                    INSERT INTO users (username, password_hash, is_admin)
+                    VALUES (%s, %s, FALSE)
+                ''', (username, password_hash))
+                conn.commit()
+                
+                logger.info(f"New user registered: {username}")
+                flash('註冊成功！請登入使用。', 'success')
+                return redirect(url_for('login'))
+            finally:
+                conn.close()
+                
+        except Exception as e:
+            logger.error(f"Registration error for {username if 'username' in locals() else 'unknown'}: {str(e)}", exc_info=True)
+            flash(f'註冊過程中發生錯誤: {str(e)}', 'error')
             return render_template('register.html')
-
-        if password != confirm_password:
-            flash('兩次輸入的密碼不一致！', 'error')
-            return render_template('register.html')
-
-        if len(password) < 6:
-            flash('密碼長度至少需 6 個字元！', 'error')
-            return render_template('register.html')
-
-        conn = get_db_connection()
-        existing_user = conn.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
-        if existing_user:
-            flash('此使用者名稱已被使用，請選擇其他名稱！', 'error')
-            conn.close()
-            return render_template('register.html')
-
-        password_hash = generate_password_hash(password)
-        conn.execute('''
-            INSERT INTO users (username, password_hash, is_admin)
-            VALUES (?, ?, 0)
-        ''', (username, password_hash))
-        conn.commit()
-        conn.close()
-
-        flash('註冊成功！請登入使用。', 'success')
-        return redirect(url_for('login'))
 
     return render_template('register.html')
 
@@ -285,7 +312,7 @@ def change_password():
 
         conn = get_db_connection()
         new_hash = generate_password_hash(new_password)
-        conn.execute('UPDATE users SET password_hash = ? WHERE id = ?', (new_hash, user['id']))
+        conn.execute('UPDATE users SET password_hash = %s WHERE id = %s', (new_hash, user['id']))
         conn.commit()
         conn.close()
 
@@ -304,7 +331,7 @@ def admin_change_password(user_id):
         return redirect(url_for('index'))
 
     conn = get_db_connection()
-    target_user = conn.execute('SELECT * FROM users WHERE id = ?', (user_id,)).fetchone()
+    target_user = conn.execute('SELECT * FROM users WHERE id = %s', (user_id,)).fetchone()
     if target_user is None:
         flash('找不到該使用者！', 'error')
         conn.close()
@@ -325,7 +352,7 @@ def admin_change_password(user_id):
             return render_template('admin_change_password.html', target_user=target_user)
 
         new_hash = generate_password_hash(new_password)
-        conn.execute('UPDATE users SET password_hash = ? WHERE id = ?', (new_hash, user_id))
+        conn.execute('UPDATE users SET password_hash = %s WHERE id = %s', (new_hash, user_id))
         conn.commit()
         conn.close()
 
@@ -374,11 +401,15 @@ def export_excel():
         cell.alignment = Alignment(horizontal='center', vertical='center')
 
     for bug in bugs:
+        # Format timestamps for display
+        report_date_str = bug['report_date'].strftime('%Y-%m-%d %H:%M:%S') if bug['report_date'] else ''
+        resolution_date_str = bug['resolution_date'].strftime('%Y-%m-%d %H:%M:%S') if bug['resolution_date'] else ''
+        
         row = [
-            bug['id'], bug['report_date'], bug['system'], bug['bug_details'],
+            bug['id'], report_date_str, bug['system'], bug['bug_details'],
             bug['reported_by'], bug['reporter_username'] or '（未登入使用者）',
             bug['status'], bug['priority'], bug['severity'],
-            bug['assigned_to'] or '', bug['resolution_date'] or '', bug['notes'] or ''
+            bug['assigned_to'] or '', resolution_date_str, bug['notes'] or ''
         ]
         ws.append(row)
 

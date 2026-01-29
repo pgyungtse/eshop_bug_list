@@ -50,7 +50,7 @@
                         {% for bug in bugs %}
                         <tr>
                             <td><strong>{{ bug['id'] }}</strong></td>
-                            <td>{{ bug['report_date'] }}</td>
+                            <td>{{ bug['report_date']|format_datetime }}</td>
                             <td>{{ bug['system'] }}</td>
                             <td>{{ bug['bug_details'] }}</td>
                             <td>{{ bug['reported_by'] }}</td>
@@ -76,7 +76,7 @@
                                 {% endif %}
                             </td>
                             <td>{{ bug['assigned_to'] or '-' }}</td>
-                            <td>{{ bug['resolution_date'] or '-' }}</td>
+                            <td>{{ bug['resolution_date']|format_datetime or '-' }}</td>
                             <td>{{ bug['notes'] or '-' }}</td>
                             <td class="text-center">
                                 {% if bug['can_edit'] and bug['status'] not in ['已解決', '已關閉'] %}

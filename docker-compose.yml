@@ -1,22 +1,31 @@
+version: '3.8'
+
 services:
   app:
     build: .
+    container_name: eshop-bug-tracker
     ports:
       - "5000:5000"
-    volumes:
-      - ./bug_tracker.db:/app/bug_tracker.db
     environment:
       - SECRET_KEY=your_secret_key_here  # Replace with your actual secret key
+      - FLASK_ENV=production
+      - TZ=Asia/Hong_Kong
+    env_file:
+      - .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
 
-  # Optional: If you want to use a separate database like PostgreSQL instead of SQLite
-  # db:
-  #   image: postgres:13
-  #   environment:
-  #     POSTGRES_DB: bug_tracker
-  #     POSTGRES_USER: user
-  #     POSTGRES_PASSWORD: password
-  #   volumes:
-  #     - db_data:/var/lib/postgresql/data
-
-volumes:
-  db_data:
+  # Note: Database is hosted on Supabase (PostgreSQL)
+  # No local database service needed
+  # Connection details are provided via .env file:
+  # - SUPABASE_URL or individual connection parameters
+  # - SUPABASE_HOST
+  # - SUPABASE_PORT
+  # - SUPABASE_DB
+  # - SUPABASE_USER
+  # - SUPABASE_PASSWORD

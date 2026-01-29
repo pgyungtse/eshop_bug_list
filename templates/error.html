@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="alert alert-danger" role="alert">
+        <h4 class="alert-heading">發生錯誤！</h4>
+        <p>伺服器遇到了一個錯誤，無法完成您的請求。</p>
+        {% if error %}
+        <hr>
+        <p><small>錯誤詳情: {{ error }}</small></p>
+        {% endif %}
+    </div>
+    <a href="{{ url_for('index') }}" class="btn btn-primary">返回首頁</a>
+</div>
+{% endblock %}
