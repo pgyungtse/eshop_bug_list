@@ -33,7 +33,9 @@
                         <tr>
                             <th>ID</th>
                             <th>報告日期</th>
-                            <th>系統</th>
+                            {% if user %}
+                                <th>系統</th>
+                            {% endif %}
                             <th>錯誤細節</th>
                             <th>報告者</th>
                             <th>報告者帳號</th>
@@ -51,7 +53,9 @@
                         <tr>
                             <td><strong>{{ bug['id'] }}</strong></td>
                             <td>{{ bug['report_date']|format_datetime }}</td>
-                            <td>{{ bug['system'] }}</td>
+                            {% if user %}
+                                <td>{{ bug['system'] }}</td>
+                            {% endif %}
                             <td>{{ bug['bug_details'] }}</td>
                             <td>{{ bug['reported_by'] }}</td>
                             <td>{{ bug['reporter_username'] or '（未登入使用者）' }}</td>

@@ -29,6 +29,10 @@
             <h1>程式更新/錯誤追蹤系統</h1>
             <div>
                 {% if user %}
+                {% if request.endpoint == 'admin_users' %}
+                    <!-- Simple logout button on admin page only -->
+                    <a href="{{ url_for('logout') }}" class="btn btn-outline-danger btn-sm">登出</a>
+                {% else %}
                     <span class="me-3 text-success fw-bold">
                         歡迎，{{ user['username'] }}
                         {% if user['is_admin'] %}<span class="badge bg-danger ms-1">管理員</span>{% endif %}
@@ -40,13 +44,18 @@
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end">
                             <li><a class="dropdown-item" href="{{ url_for('change_password') }}">變更密碼</a></li>
+                            {% if user['is_admin'] %}
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin_users') }}">管理使用者</a></li>
+                            {% endif %}
                             <li><hr class="dropdown-divider"></li>
                             <li><a class="dropdown-item text-danger" href="{{ url_for('logout') }}">登出</a></li>
                         </ul>
                     </div>
-                {% else %}
-                    <a href="{{ url_for('login') }}" class="btn btn-outline-primary btn-sm">登入</a>
                 {% endif %}
+            {% else %}
+                <a href="{{ url_for('login') }}" class="btn btn-outline-primary btn-sm">登入</a>
+            {% endif %}
             </div>
         </div>
 

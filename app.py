@@ -70,19 +70,54 @@ def index():
         query = request.args.get('query', '')
         conn = get_db_connection()
 
+        # Build permission filters based on user rights
+        allowed_systems = []
+        # Map module flags to system name fragments (case-insensitive)
+        if user.get('m18'):
+            allowed_systems.append('m18')
+        if user.get('eshop'):
+            allowed_systems.append('eshop')
+        if user.get('jetplus'):
+            allowed_systems.append('jetplus')
+        if user.get('sugarcrm'):
+            allowed_systems.append('sugarcrm')
+        if user.get('shopline'):
+            allowed_systems.append('shopline')
+
+        def build_permission_clause(user_id, systems):
+            # Returns (clause_sql, params)
+            if systems:
+                # We'll use ILIKE pattern matching for flexible matching
+                system_clauses = ' OR '.join(['b.system ILIKE %s' for _ in systems])
+                clause = f"(b.reported_by_user_id = %s OR ({system_clauses}))"
+                params = [user_id] + [f'%{s}%' for s in systems]
+            else:
+                clause = "(b.reported_by_user_id = %s)"
+                params = [user_id]
+            return clause, params
+
         if query:
-            bugs = conn.execute('''
-                SELECT b.*, u.username as reporter_username 
-                FROM bugs b LEFT JOIN users u ON b.reported_by_user_id = u.id
-                WHERE b.bug_details ILIKE %s OR b.system ILIKE %s OR b.notes ILIKE %s
-                ORDER BY b.report_date DESC
-            ''', (f'%{query}%', f'%{query}%', f'%{query}%')).fetchall()
+            search_clause = '(b.bug_details ILIKE %s OR b.system ILIKE %s OR b.notes ILIKE %s)'
+            search_params = [f'%{query}%', f'%{query}%', f'%{query}%']
+            if is_admin(user):
+                sql = f"SELECT b.*, u.username as reporter_username FROM bugs b LEFT JOIN users u ON b.reported_by_user_id = u.id WHERE {search_clause} ORDER BY b.report_date DESC"
+                bugs = conn.execute(sql, tuple(search_params)).fetchall()
+            else:
+                perm_clause, perm_params = build_permission_clause(user['id'], allowed_systems)
+                sql = f"SELECT b.*, u.username as reporter_username FROM bugs b LEFT JOIN users u ON b.reported_by_user_id = u.id WHERE {search_clause} AND {perm_clause} ORDER BY b.report_date DESC"
+                bugs = conn.execute(sql, tuple(search_params + perm_params)).fetchall()
         else:
-            bugs = conn.execute('''
-                SELECT b.*, u.username as reporter_username 
-                FROM bugs b LEFT JOIN users u ON b.reported_by_user_id = u.id
-                ORDER BY b.report_date DESC
-            ''').fetchall()
+            if is_admin(user):
+                bugs = conn.execute('''
+                    SELECT b.*, u.username as reporter_username 
+                    FROM bugs b LEFT JOIN users u ON b.reported_by_user_id = u.id
+                    ORDER BY b.report_date DESC
+                ''').fetchall()
+            else:
+                perm_clause, perm_params = build_permission_clause(user['id'], allowed_systems)
+                sql = f"SELECT b.*, u.username as reporter_username FROM bugs b LEFT JOIN users u ON b.reported_by_user_id = u.id WHERE {perm_clause} ORDER BY b.report_date DESC"
+                bugs = conn.execute(sql, tuple(perm_params)).fetchall()
+
         conn.close()
 
         bugs_with_permission = []
@@ -222,6 +257,12 @@ def login():
         conn.close()
 
         if user and check_password_hash(user['password_hash'], password):
+            # Check if user account is active
+            if not user.get('active', True):  # Default to True if field doesn't exist
+                flash('此帳號已被停用，無法登入！', 'error')
+                logger.warning(f"Attempted login by inactive user: {username}")
+                return render_template('login.html')
+            
             session['user_id'] = user['id']
             flash('登入成功！', 'success')
             return redirect(url_for('index'))
@@ -362,6 +403,55 @@ def admin_change_password(user_id):
     conn.close()
     return render_template('admin_change_password.html', target_user=target_user)
 
+# 管理員 - 使用者管理頁面
+@app.route('/admin/users', methods=['GET'])
+def admin_users():
+    user = get_current_user()
+    if not user or not is_admin(user):
+        flash('只有管理員才能訪問此頁面！', 'error')
+        return redirect(url_for('index'))
+    
+    conn = get_db_connection()
+    all_users = conn.execute('SELECT * FROM users ORDER BY id').fetchall()
+    conn.close()
+    
+    # Pass `user` as well so base.html can detect login state and hide login button
+    return render_template('admin_users.html', users=all_users, current_user=user, user=user)
+
+# 管理員 - 更新使用者權限
+@app.route('/admin/user/<int:user_id>', methods=['POST'])
+def admin_update_user(user_id):
+    user = get_current_user()
+    if not user or not is_admin(user):
+        flash('只有管理員才能執行此操作！', 'error')
+        return redirect(url_for('index'))
+    
+    try:
+        # Get form data for module access (checkboxes return 'on' if checked)
+        active = 'active' in request.form
+        m18 = 'm18' in request.form
+        eshop = 'eshop' in request.form
+        jetplus = 'jetplus' in request.form
+        sugarcrm = 'sugarcrm' in request.form
+        shopline = 'shopline' in request.form
+        is_admin_checkbox = 'is_admin' in request.form
+        
+        conn = get_db_connection()
+        conn.execute('''
+            UPDATE users 
+            SET active = %s, m18 = %s, eshop = %s, jetplus = %s, sugarcrm = %s, shopline = %s, is_admin = %s
+            WHERE id = %s
+        ''', (active, m18, eshop, jetplus, sugarcrm, shopline, is_admin_checkbox, user_id))
+        conn.commit()
+        conn.close()
+        
+        flash('使用者權限已更新成功！', 'success')
+    except Exception as e:
+        logger.error(f"Error updating user {user_id}: {str(e)}")
+        flash(f'更新使用者權限失敗: {str(e)}', 'error')
+    
+    return redirect(url_for('admin_users'))
+
 # 匯出 Excel 報表（僅登入使用者）
 @app.route('/export_excel')
 def export_excel():
@@ -371,13 +461,43 @@ def export_excel():
         return redirect(url_for('login'))
 
     conn = get_db_connection()
-    bugs = conn.execute('''
-        SELECT b.id, b.report_date, b.system, b.bug_details, b.reported_by,
-               b.status, b.priority, b.severity, b.assigned_to, b.resolution_date, b.notes,
-               u.username as reporter_username
-        FROM bugs b LEFT JOIN users u ON b.reported_by_user_id = u.id
-        ORDER BY b.report_date DESC
-    ''').fetchall()
+
+    # Build permission filters similar to index()
+    allowed_systems = []
+    if user.get('m18'):
+        allowed_systems.append('m18')
+    if user.get('eshop'):
+        allowed_systems.append('eshop')
+    if user.get('jetplus'):
+        allowed_systems.append('jetplus')
+    if user.get('sugarcrm'):
+        allowed_systems.append('sugarcrm')
+    if user.get('shopline'):
+        allowed_systems.append('shopline')
+
+    def build_perm_clause_export(user_id, systems):
+        if systems:
+            system_clauses = ' OR '.join(['b.system ILIKE %s' for _ in systems])
+            clause = f"(b.reported_by_user_id = %s OR ({system_clauses}))"
+            params = [user_id] + [f'%{s}%' for s in systems]
+        else:
+            clause = "(b.reported_by_user_id = %s)"
+            params = [user_id]
+        return clause, params
+
+    if is_admin(user):
+        bugs = conn.execute('''
+            SELECT b.id, b.report_date, b.system, b.bug_details, b.reported_by,
+                   b.status, b.priority, b.severity, b.assigned_to, b.resolution_date, b.notes,
+                   u.username as reporter_username
+            FROM bugs b LEFT JOIN users u ON b.reported_by_user_id = u.id
+            ORDER BY b.report_date DESC
+        ''').fetchall()
+    else:
+        perm_clause, perm_params = build_perm_clause_export(user['id'], allowed_systems)
+        sql = f"SELECT b.id, b.report_date, b.system, b.bug_details, b.reported_by, b.status, b.priority, b.severity, b.assigned_to, b.resolution_date, b.notes, u.username as reporter_username FROM bugs b LEFT JOIN users u ON b.reported_by_user_id = u.id WHERE {perm_clause} ORDER BY b.report_date DESC"
+        bugs = conn.execute(sql, tuple(perm_params)).fetchall()
+
     conn.close()
 
     wb = Workbook()
