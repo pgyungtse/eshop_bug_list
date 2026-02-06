@@ -51,7 +51,7 @@
                     <tbody>
                         {% for bug in bugs %}
                         <tr>
-                            <td><strong>{{ bug['id'] }}</strong></td>
+                            <td><strong><a href="{{ url_for('view_bug', id=bug['id']) }}">{{ bug['id'] }}</a></strong></td>
                             <td>{{ bug['report_date']|format_datetime }}</td>
                             {% if user %}
                                 <td>{{ bug['system'] }}</td>

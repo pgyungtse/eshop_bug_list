@@ -4,10 +4,13 @@ from dotenv import load_dotenv
 import os
 import logging
 from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.utils import secure_filename
+import tempfile
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from io import BytesIO
 from db_supabase import get_db_connection_wrapper
+from tt import upload_file_to_supabase
 
 load_dotenv()
 
@@ -153,6 +156,31 @@ def add_bug():
         notes = request.form.get('notes', '').strip()
         reported_by_user_id = user['id'] if user else None
 
+        # 處理檔案上傳（可選）
+        file_path_url = None
+        uploaded_file = request.files.get('file')
+        if uploaded_file and uploaded_file.filename:
+            try:
+                filename = secure_filename(uploaded_file.filename)
+                tmp_dir = tempfile.gettempdir()
+                tmp_path = os.path.join(tmp_dir, f"upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{filename}")
+                uploaded_file.save(tmp_path)
+
+                success, result = upload_file_to_supabase(local_path=tmp_path, bucket_folder='bug_reports', upsert=False)
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+
+                if success:
+                    file_path_url = result
+                else:
+                    flash(f'檔案上傳失敗：{result}', 'error')
+                    file_path_url = None
+            except Exception as e:
+                flash(f'檔案處理失敗：{str(e)}', 'error')
+                file_path_url = None
+
         if status in ['已解決', '已關閉'] and not notes:
             flash('當狀態設為「已解決」或「已關閉」時，必須填寫備註說明解決方式或關閉原因！', 'error')
             return render_template('add.html', user=user)
@@ -160,9 +188,9 @@ def add_bug():
         conn = get_db_connection()
         conn.execute('''
             INSERT INTO bugs 
-            (report_date, system, bug_details, reported_by, status, priority, severity, assigned_to, notes, reported_by_user_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ''', (datetime.now(), system, bug_details, reported_by, status, priority, severity, assigned_to, notes, reported_by_user_id))
+            (report_date, system, bug_details, reported_by, status, priority, severity, assigned_to, notes, reported_by_user_id, file_path)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ''', (datetime.now(), system, bug_details, reported_by, status, priority, severity, assigned_to, notes, reported_by_user_id, file_path_url))
         conn.commit()
         conn.close()
         flash('記錄新增成功！')
@@ -224,6 +252,25 @@ def edit_bug(id):
         return redirect(url_for('index'))
 
     return render_template('edit.html', bug=bug, user=user)
+
+
+# 檢視錯誤記錄（只讀檢視，顯示上傳的圖片/檔案）
+@app.route('/view/<int:id>', methods=['GET'])
+def view_bug(id):
+    user = get_current_user()
+    conn = get_db_connection()
+    bug = conn.execute('SELECT * FROM bugs WHERE id = %s', (id,)).fetchone()
+    conn.close()
+
+    if bug is None:
+        flash('找不到該錯誤記錄！', 'error')
+        return redirect(url_for('index'))
+
+    # Determine if current user can edit/delete (for showing action buttons)
+    bug_dict = dict(bug)
+    bug_dict['can_edit'] = can_edit_or_delete(bug, user)
+
+    return render_template('view.html', bug=bug_dict, user=user)
 
 # 刪除錯誤記錄
 @app.route('/delete/<int:id>', methods=['POST'])

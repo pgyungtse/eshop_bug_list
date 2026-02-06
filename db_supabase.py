@@ -7,7 +7,11 @@ from datetime import datetime
 load_dotenv()
 
 # Supabase PostgreSQL connection parameters
-SUPABASE_URL = os.getenv('SUPABASE_URL')  # e.g., "postgresql://user:password@db.supabase.co:5432/postgres"
+# Prefer an actual Postgres connection URL in `DATABASE_URL` or `SUPABASE_DB_URL`.
+# If the project SUPABASE_URL (https://...) was provided by mistake, fall back to
+# using separate host/user/password/env vars.
+SUPABASE_DB_URL = os.getenv('DATABASE_URL') or os.getenv('SUPABASE_DB_URL')
+SUPABASE_URL = os.getenv('SUPABASE_URL')  # project URL (https://...) - not a DB dsn
 SUPABASE_HOST = os.getenv('SUPABASE_HOST')
 SUPABASE_PORT = os.getenv('SUPABASE_PORT', '5432')
 SUPABASE_DB = os.getenv('SUPABASE_DB', 'postgres')
@@ -17,17 +21,27 @@ SUPABASE_PASSWORD = os.getenv('SUPABASE_PASSWORD')
 def get_db_connection():
     """Create and return a PostgreSQL database connection"""
     try:
-        # Use connection string if SUPABASE_URL is provided, otherwise use individual parameters
-        if SUPABASE_URL:
-            conn = psycopg2.connect(SUPABASE_URL)
-        else:
-            conn = psycopg2.connect(
-                host=SUPABASE_HOST,
-                port=SUPABASE_PORT,
-                database=SUPABASE_DB,
-                user=SUPABASE_USER,
-                password=SUPABASE_PASSWORD
-            )
+        # If a real Postgres URL is provided prefer it
+        if SUPABASE_DB_URL:
+            return psycopg2.connect(SUPABASE_DB_URL)
+
+        # If SUPABASE_URL was set to a project HTTP URL (starts with http),
+        # it is not a valid DSN. Fall back to individual env vars.
+        if SUPABASE_URL and SUPABASE_URL.startswith('http'):
+            if not all([SUPABASE_HOST, SUPABASE_USER, SUPABASE_PASSWORD]):
+                raise psycopg2.OperationalError(
+                    'SUPABASE_URL appears to be a project URL (https://...).\n'
+                    'Set `DATABASE_URL` (postgres://...) or provide SUPABASE_HOST, SUPABASE_USER, and SUPABASE_PASSWORD in your .env'
+                )
+
+        # Use individual parameters
+        conn = psycopg2.connect(
+            host=SUPABASE_HOST,
+            port=SUPABASE_PORT,
+            database=SUPABASE_DB,
+            user=SUPABASE_USER,
+            password=SUPABASE_PASSWORD
+        )
         return conn
     except psycopg2.Error as e:
         print(f"Database connection error: {e}")
@@ -37,7 +51,7 @@ def dict_factory(cursor, row):
     """Convert database row to dictionary"""
     d = {}
     for idx, col in enumerate(cursor.description):
-        d[col[name]] = row[idx]
+        d[col[0]] = row[idx]
     return d
 
 class Row:
@@ -172,7 +186,8 @@ def init_db():
                 assigned_to TEXT,
                 resolution_date TIMESTAMPTZ,
                 notes TEXT,
-                reported_by_user_id INTEGER REFERENCES users(id)
+                reported_by_user_id INTEGER REFERENCES users(id),
+                file_path TEXT
             )
         ''')
         

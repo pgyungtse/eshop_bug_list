@@ -6,7 +6,7 @@
 <div class="container mt-4">
     <h2 class="mb-4">新增錯誤記錄</h2>
     
-    <form method="POST">
+    <form method="POST" enctype="multipart/form-data">
         <div class="row">
             <div class="col-md-8">
                 <div class="mb-3">
@@ -76,6 +76,11 @@
                 <div class="mb-3">
                     <label for="notes" class="form-label">備註</label>
                     <textarea class="form-control" id="notes" name="notes" rows="3" placeholder="如為已解決或已關閉，請在此說明解決方式或關閉原因..."></textarea>
+                </div>
+
+                <div class="mb-3">
+                    <label for="file" class="form-label">上傳截圖或檔案（選填）</label>
+                    <input class="form-control" type="file" id="file" name="file" accept="image/*">
                 </div>
 
                 <div class="d-flex gap-2">
