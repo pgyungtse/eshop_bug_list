@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block title %}管理員首頁{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+  <h2 class="mb-4">管理員首頁</h2>
+  <p>此頁為管理員專用的起始頁面。未來可在此加入快速連結與管理工具。</p>
+
+  <div class="row">
+    <div class="col-md-4">
+      <div class="card mb-3">
+        <div class="card-body">
+          <h5 class="card-title">錯誤追蹤系統</h5>
+          <p class="card-text">前往錯誤追蹤系統查看與管理錯誤記錄。</p>
+          <a href="{{ url_for('index') }}" class="btn btn-primary">前往錯誤追蹤</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-4">
+      <div class="card mb-3">
+        <div class="card-body">
+          <h5 class="card-title">網頁速度測試</h5>
+          <p class="card-text">使用外部速度測試工具檢查網站效能（新視窗開啟）。</p>
+          <a href="http://192.168.10.203:3000" target="_blank" rel="noopener" class="btn btn-primary">前往速度測試</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-4">
+      <div class="card mb-3">
+        <div class="card-body">
+          <h5 class="card-title">使用者管理</h5>
+          <p class="card-text">管理系統使用者與權限。</p>
+          <a href="{{ url_for('admin_users') }}" class="btn btn-outline-primary">前往使用者管理</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

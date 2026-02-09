@@ -55,7 +55,20 @@ def get_current_user():
 
 # 判斷是否為管理員
 def is_admin(user):
-    return user['is_admin'] is True if user else False
+    """Return True if the given user object represents an admin.
+
+    Handles boolean, integer (1/0) and common string representations.
+    """
+    if not user:
+        return False
+    val = user.get('is_admin')
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, (int, float)):
+        return val != 0
+    if isinstance(val, str):
+        return val.strip().lower() in ('1', 'true', 't', 'yes', 'y')
+    return bool(val)
 
 # 判斷目前使用者是否有權編輯或刪除指定 bug
 def can_edit_or_delete(bug, user):
@@ -433,9 +446,13 @@ def login():
                 flash('此帳號已被停用，無法登入！', 'error')
                 logger.warning(f"Attempted login by inactive user: {username}")
                 return render_template('login.html')
-            
+
+            # Successful login: set session and redirect
             session['user_id'] = user['id']
             flash('登入成功！', 'success')
+            # Redirect admin users to the admin landing page
+            if is_admin(user):
+                return redirect(url_for('admin_landing'))
             return redirect(url_for('index'))
         else:
             flash('使用者名稱或密碼錯誤！', 'error')
@@ -588,6 +605,17 @@ def admin_users():
     
     # Pass `user` as well so base.html can detect login state and hide login button
     return render_template('admin_users.html', users=all_users, current_user=user, user=user)
+
+
+# 管理員首頁（管理員專用的 Landing 頁面，未來可加入更多功能）
+@app.route('/admin', methods=['GET'])
+def admin_landing():
+    user = get_current_user()
+    if not user or not is_admin(user):
+        flash('只有管理員才能訪問此頁面！', 'error')
+        return redirect(url_for('index'))
+
+    return render_template('admin_landing.html', user=user)
 
 # 管理員 - 更新使用者權限
 @app.route('/admin/user/<int:user_id>', methods=['POST'])
