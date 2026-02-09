@@ -79,9 +79,35 @@
                 </div>
 
                 <div class="mb-3">
-                    <label for="file" class="form-label">上傳截圖或檔案（選填）</label>
-                    <input class="form-control" type="file" id="file" name="file" accept="image/*">
+                    <label for="file" class="form-label">上傳截圖或檔案（選填，可選擇多個檔案）</label>
+                    <input class="form-control" type="file" id="file" name="file" accept="image/*" multiple>
                 </div>
+
+                <div id="file-preview" class="row g-2 mb-3"></div>
+
+                <script>
+                document.getElementById('file').addEventListener('change', function(e) {
+                    const preview = document.getElementById('file-preview');
+                    preview.innerHTML = '';
+                    Array.from(e.target.files).forEach((file, idx) => {
+                        const reader = new FileReader();
+                        reader.onload = (ev) => {
+                            const col = document.createElement('div');
+                            col.className = 'col-md-3';
+                            col.innerHTML = `
+                                <div class="card">
+                                    <img src="${ev.target.result}" class="card-img-top" style="height:150px;object-fit:cover;">
+                                    <div class="card-body p-2">
+                                        <small class="text-muted">${file.name}</small>
+                                    </div>
+                                </div>
+                            `;
+                            preview.appendChild(col);
+                        };
+                        reader.readAsDataURL(file);
+                    });
+                });
+                </script>
 
                 <div class="d-flex gap-2">
                     <button type="submit" class="btn btn-primary btn-lg">提交新增</button>

@@ -6,7 +6,7 @@
 <div class="container mt-4">
     <h2 class="mb-4">編輯錯誤記錄 (ID: {{ bug['id'] }})</h2>
     
-    <form method="POST">
+    <form method="POST" enctype="multipart/form-data">
         <div class="row">
             <div class="col-md-8">
                 <!-- 系統欄位：唯讀顯示，不允許修改 -->
@@ -77,6 +77,63 @@
                     <textarea class="form-control" id="notes" name="notes" rows="3">{{ bug['notes'] or '' }}</textarea>
                     <div class="form-text">若將狀態改為「已解決」或「已關閉」，此欄位為必填。</div>
                 </div>
+
+                <!-- 顯示已上傳的檔案 -->
+                {% if bug.get('file_paths') and bug['file_paths']|length > 0 %}
+                <div class="mb-3">
+                    <label class="form-label">已上傳的檔案</label>
+                    <div class="row g-3" id="existing-files">
+                        {% for file_url in bug['file_paths'] %}
+                        {% if file_url %}
+                        <div class="col-md-3">
+                            <div class="card">
+                                <a href="{{ file_url }}" target="_blank">
+                                    <img src="{{ file_url }}" class="card-img-top" style="height:200px;object-fit:cover;" alt="attachment">
+                                </a>
+                                <div class="card-body p-2">
+                                    <form action="{{ url_for('delete_file', bug_id=bug['id'], file_index=loop.index0) }}" method="POST" style="margin:0;" onsubmit="return confirm('確定要刪除這個檔案嗎？');">
+                                        <button type="submit" class="btn btn-sm btn-danger w-100">刪除</button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- 上傳新檔案 -->
+                <div class="mb-3">
+                    <label for="file" class="form-label">上傳新檔案（選填，可選擇多個檔案）</label>
+                    <input class="form-control" type="file" id="file" name="file" accept="image/*" multiple>
+                </div>
+
+                <div id="file-preview" class="row g-2 mb-3"></div>
+
+                <script>
+                document.getElementById('file').addEventListener('change', function(e) {
+                    const preview = document.getElementById('file-preview');
+                    preview.innerHTML = '';
+                    Array.from(e.target.files).forEach((file, idx) => {
+                        const reader = new FileReader();
+                        reader.onload = (ev) => {
+                            const col = document.createElement('div');
+                            col.className = 'col-md-3';
+                            col.innerHTML = `
+                                <div class="card">
+                                    <img src="${ev.target.result}" class="card-img-top" style="height:150px;object-fit:cover;">
+                                    <div class="card-body p-2">
+                                        <small class="text-muted">${file.name}</small>
+                                    </div>
+                                </div>
+                            `;
+                            preview.appendChild(col);
+                        };
+                        reader.readAsDataURL(file);
+                    });
+                });
+                </script>
 
                 <div class="d-flex gap-2">
                     <button type="submit" class="btn btn-primary btn-lg">更新記錄</button>

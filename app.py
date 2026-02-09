@@ -3,6 +3,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 import os
 import logging
+import json
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 import tempfile
@@ -156,42 +157,62 @@ def add_bug():
         notes = request.form.get('notes', '').strip()
         reported_by_user_id = user['id'] if user else None
 
-        # 處理檔案上傳（可選）
-        file_path_url = None
-        uploaded_file = request.files.get('file')
-        if uploaded_file and uploaded_file.filename:
-            try:
-                filename = secure_filename(uploaded_file.filename)
-                tmp_dir = tempfile.gettempdir()
-                tmp_path = os.path.join(tmp_dir, f"upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{filename}")
-                uploaded_file.save(tmp_path)
-
-                success, result = upload_file_to_supabase(local_path=tmp_path, bucket_folder='bug_reports', upsert=False)
-                try:
-                    os.remove(tmp_path)
-                except Exception:
-                    pass
-
-                if success:
-                    file_path_url = result
-                else:
-                    flash(f'檔案上傳失敗：{result}', 'error')
-                    file_path_url = None
-            except Exception as e:
-                flash(f'檔案處理失敗：{str(e)}', 'error')
-                file_path_url = None
-
         if status in ['已解決', '已關閉'] and not notes:
             flash('當狀態設為「已解決」或「已關閉」時，必須填寫備註說明解決方式或關閉原因！', 'error')
             return render_template('add.html', user=user)
 
+        # 先插入記錄以取得 bug ID
         conn = get_db_connection()
         conn.execute('''
             INSERT INTO bugs 
             (report_date, system, bug_details, reported_by, status, priority, severity, assigned_to, notes, reported_by_user_id, file_path)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ''', (datetime.now(), system, bug_details, reported_by, status, priority, severity, assigned_to, notes, reported_by_user_id, file_path_url))
+        ''', (datetime.now(), system, bug_details, reported_by, status, priority, severity, assigned_to, notes, reported_by_user_id, None))
         conn.commit()
+        
+        # 取得新插入記錄的 ID
+        new_bug = conn.execute('SELECT id FROM bugs ORDER BY id DESC LIMIT 1').fetchone()
+        bug_id = new_bug['id'] if new_bug else None
+        
+        # 處理檔案上傳（可選，支援多個檔案）
+        file_paths_list = []
+        if bug_id:
+            uploaded_files = request.files.getlist('file')
+            for uploaded_file in uploaded_files:
+                if uploaded_file and uploaded_file.filename:
+                    try:
+                        filename = secure_filename(uploaded_file.filename)
+                        tmp_dir = tempfile.gettempdir()
+                        tmp_path = os.path.join(tmp_dir, f"upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{filename}")
+                        uploaded_file.save(tmp_path)
+                        
+                        logger.info(f"Uploading file: {filename} to {tmp_path}")
+
+                        success, result = upload_file_to_supabase(local_path=tmp_path, bucket_folder='bug_reports', upsert=False, bug_id=bug_id)
+                        logger.info(f"Upload result for {filename}: success={success}, result={result}")
+                        
+                        try:
+                            os.remove(tmp_path)
+                        except Exception:
+                            pass
+
+                        if success:
+                            file_paths_list.append(result)
+                            flash(f'檔案 {filename} 上傳成功！', 'success')
+                        else:
+                            flash(f'檔案 {filename} 上傳失敗：{result}', 'error')
+                            logger.error(f"File upload failed for {filename}: {result}")
+                    except Exception as e:
+                        error_msg = str(e)
+                        logger.error(f"File processing error for {filename}: {error_msg}", exc_info=True)
+                        flash(f'檔案 {filename} 處理失敗：{error_msg}', 'error')
+
+            # 更新記錄的檔案路徑
+            if file_paths_list:
+                file_paths_json = json.dumps(file_paths_list)
+                conn.execute('UPDATE bugs SET file_path = %s WHERE id = %s', (file_paths_json, bug_id))
+                conn.commit()
+
         conn.close()
         flash('記錄新增成功！')
         return redirect(url_for('index'))
@@ -222,6 +243,14 @@ def edit_bug(id):
         flash('您沒有權限編輯此記錄！', 'error')
         return redirect(url_for('index'))
 
+    # Parse file_path JSON for display
+    bug_dict = dict(bug)
+    try:
+        bug_dict['file_paths'] = json.loads(bug_dict.get('file_path')) if bug_dict.get('file_path') else []
+    except (json.JSONDecodeError, TypeError):
+        bug_dict['file_paths'] = [bug_dict.get('file_path')] if bug_dict.get('file_path') else []
+    bug = bug_dict
+
     if request.method == 'POST':
         bug_details = request.form['bug_details'].strip()
         reported_by = request.form['reported_by'].strip()
@@ -239,13 +268,60 @@ def edit_bug(id):
         if bug['status'] not in ['已解決', '已關閉'] and status in ['已解決', '已關閉']:
             resolution_date = datetime.now()
 
+        # 處理檔案上傳（可選，支援多個檔案）
+        file_paths_list = []
+        
+        # 保留既有檔案
+        try:
+            existing_paths = json.loads(bug.get('file_path')) if bug.get('file_path') else []
+            file_paths_list = existing_paths if isinstance(existing_paths, list) else []
+        except (json.JSONDecodeError, TypeError):
+            file_paths_list = [bug.get('file_path')] if bug.get('file_path') else []
+        
+        # 新增上傳的檔案
+        uploaded_files = request.files.getlist('file')
+        logger.info(f"[EDIT] Files received: {len(uploaded_files)} files")
+        for i, f in enumerate(uploaded_files):
+            logger.info(f"[EDIT] File {i}: filename={f.filename if f else 'None'}, content_type={f.content_type if f else 'None'}")
+        for uploaded_file in uploaded_files:
+            if uploaded_file and uploaded_file.filename:
+                try:
+                    filename = secure_filename(uploaded_file.filename)
+                    tmp_dir = tempfile.gettempdir()
+                    tmp_path = os.path.join(tmp_dir, f"upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{filename}")
+                    uploaded_file.save(tmp_path)
+                    
+                    logger.info(f"Uploading file: {filename} to {tmp_path}")
+
+                    success, result = upload_file_to_supabase(local_path=tmp_path, bucket_folder='bug_reports', upsert=False, bug_id=id)
+                    logger.info(f"Upload result for {filename}: success={success}, result={result}")
+                    
+                    try:
+                        os.remove(tmp_path)
+                    except Exception:
+                        pass
+
+                    if success:
+                        file_paths_list.append(result)
+                        flash(f'檔案 {filename} 上傳成功！', 'success')
+                    else:
+                        flash(f'檔案 {filename} 上傳失敗：{result}', 'error')
+                        logger.error(f"File upload failed for {filename}: {result}")
+                except Exception as e:
+                    error_msg = str(e)
+                    logger.error(f"File processing error for {filename}: {error_msg}", exc_info=True)
+                    flash(f'檔案 {filename} 處理失敗：{error_msg}', 'error')
+
+        # 將檔案路徑儲存為 JSON 陣列
+        file_paths_json = json.dumps(file_paths_list) if file_paths_list else None
+
         conn = get_db_connection()
         conn.execute('''
             UPDATE bugs 
             SET bug_details = %s, reported_by = %s, status = %s, priority = %s, severity = %s, 
-                assigned_to = %s, notes = %s, resolution_date = %s
+                assigned_to = %s, notes = %s, resolution_date = %s, file_path = %s
             WHERE id = %s
-        ''', (bug_details, reported_by, status, priority, severity, assigned_to, notes, resolution_date, id))
+        ''', (bug_details, reported_by, status, priority, severity, assigned_to, notes, resolution_date, file_paths_json, id))
         conn.commit()
         conn.close()
         flash('記錄更新成功！')
@@ -269,8 +345,56 @@ def view_bug(id):
     # Determine if current user can edit/delete (for showing action buttons)
     bug_dict = dict(bug)
     bug_dict['can_edit'] = can_edit_or_delete(bug, user)
+    
+    # Parse file_path JSON
+    try:
+        bug_dict['file_paths'] = json.loads(bug_dict.get('file_path')) if bug_dict.get('file_path') else []
+    except (json.JSONDecodeError, TypeError):
+        # Fallback for old single-file format
+        bug_dict['file_paths'] = [bug_dict.get('file_path')] if bug_dict.get('file_path') else []
 
     return render_template('view.html', bug=bug_dict, user=user)
+
+# 刪除單個檔案
+@app.route('/delete_file/<int:bug_id>/<file_index>', methods=['POST'])
+def delete_file(bug_id, file_index):
+    user = get_current_user()
+    if not user:
+        flash('請先登入！', 'error')
+        return redirect(url_for('login'))
+
+    conn = get_db_connection()
+    bug = conn.execute('SELECT * FROM bugs WHERE id = %s', (bug_id,)).fetchone()
+
+    if bug is None:
+        flash('找不到該錯誤記錄！', 'error')
+        conn.close()
+        return redirect(url_for('index'))
+
+    if not can_edit_or_delete(bug, user):
+        flash('您沒有權限刪除此檔案！', 'error')
+        conn.close()
+        return redirect(url_for('view_bug', id=bug_id))
+
+    try:
+        file_index = int(file_index)
+        file_paths = json.loads(bug['file_path']) if bug.get('file_path') else []
+        
+        if 0 <= file_index < len(file_paths):
+            file_paths.pop(file_index)
+            file_paths_json = json.dumps(file_paths) if file_paths else None
+            
+            conn.execute('UPDATE bugs SET file_path = %s WHERE id = %s', (file_paths_json, bug_id))
+            conn.commit()
+            flash('檔案刪除成功！', 'success')
+        else:
+            flash('無法刪除該檔案！', 'error')
+    except (json.JSONDecodeError, ValueError):
+        flash('處理檔案時出錯！', 'error')
+    finally:
+        conn.close()
+
+    return redirect(url_for('view_bug', id=bug_id))
 
 # 刪除錯誤記錄
 @app.route('/delete/<int:id>', methods=['POST'])
